@@ -237,7 +237,8 @@
     </main>
 
     <script>
-      const REPO_OWNER = "BCJACK0125";
+      // ⚠️ 請務必將這裡修改為你自己的 GitHub 資訊
+      const REPO_OWNER = "BCJACK0125"; 
       const REPO_NAME = "Byte_FerryMan";
 
       const prefix = "----BEGIN FERRY DATA----";
@@ -258,25 +259,47 @@
 
       function buildIssueUrl(title, body) {
         const base = `https://github.com/${REPO_OWNER}/${REPO_NAME}/issues/new`;
-        const params = new URLSearchParams({
-          title,
-          body,
-        });
+        const params = new URLSearchParams({ title, body });
         return `${base}?${params.toString()}`;
       }
 
       document.getElementById("launch").addEventListener("click", () => {
-        const title = subjectInput.value.trim() || "Byte Ferryman";
+        // 1. 防呆機制：檢查是否修改了預設帳號
+        if (REPO_OWNER === "YOUR_GITHUB_USERNAME") {
+          alert("❌ 請先修改 index.html 原始碼中的 REPO_OWNER 為您真正的 GitHub 帳號！");
+          status.textContent = "設定錯誤";
+          return;
+        }
+
+        const title = subjectInput.value.trim() || "Byte Ferryman Data";
         const rawMessage = messageInput.value.trim();
         const payload = rawMessage ? base64EncodeUnicode(rawMessage) : "";
 
         const block = `${prefix}\n${payload}\n${suffix}`;
-        const note = "請在此 Issue 內拖曳檔案後再送出。";
-        const body = `${block}\n\n${note}`;
+        const note = "🚢 【擺渡提示】請將您的 .zip、.pdf 或圖片直接拖曳到下方輸入框，然後點擊右下角的 Submit 即可啟航！";
+        const fullBody = `${block}\n\n${note}`;
 
-        const url = buildIssueUrl(title, body);
-        status.textContent = "已建立啟航連結";
-        window.open(url, "_blank", "noopener");
+        // 2. 測試網址長度是否會超載 (安全上限約 2000 字元)
+        const targetUrl = buildIssueUrl(title, fullBody);
+
+        if (targetUrl.length > 2000) {
+          // 3. 超長文字優化方案：使用智慧剪貼簿
+          navigator.clipboard.writeText(fullBody).then(() => {
+            alert("📝 提示：由於您輸入的文字內容較長，已為您【自動複製】加密文本！\n\n新分頁開啟後，請直接在 GitHub 內容框中「貼上 (Ctrl+V)」，並可同時拖入檔案，最後點擊 Submit 即可。");
+            
+            // 帶入精簡版 URL，避免 414 錯誤
+            const shortBody = "【請在此處直接 貼上(Ctrl+V) 已自動複製的加密文字，並可拖入實體檔案】\n\n" + note;
+            const shortUrl = buildIssueUrl(title, shortBody);
+            window.open(shortUrl, "_blank", "noopener");
+            status.textContent = "文字已複製，請至新分頁貼上";
+          }).catch(err => {
+            alert("自動複製失敗，請減少文字量，或手動複製內文後再點擊啟航。");
+          });
+        } else {
+          // 4. 正常長度：直接帶入網址開啟
+          status.textContent = "已建立啟航連結，前往中繼站...";
+          window.open(targetUrl, "_blank", "noopener");
+        }
       });
     </script>
   </body>
