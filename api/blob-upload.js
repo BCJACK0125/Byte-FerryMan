@@ -34,6 +34,13 @@ module.exports = async (req, res) => {
     return;
   }
 
+  if (!process.env.BLOB_READ_WRITE_TOKEN) {
+    res.setHeader("Content-Type", "application/json");
+    res.statusCode = 500;
+    res.end(JSON.stringify({ error: "Missing BLOB_READ_WRITE_TOKEN" }));
+    return;
+  }
+
   let handleUpload = null;
   try {
     ({ handleUpload } = require("@vercel/blob/server"));
@@ -71,6 +78,7 @@ module.exports = async (req, res) => {
     res.statusCode = 200;
     res.end(JSON.stringify(jsonResponse));
   } catch (error) {
+    console.error("Blob upload error:", error);
     res.setHeader("Content-Type", "application/json");
     res.statusCode = 500;
     res.end(JSON.stringify({ error: error?.message || "Upload Token Failed" }));
