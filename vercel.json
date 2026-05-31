@@ -2,9 +2,6 @@
   "functions": {
     "api/*.js": {
       "includeFiles": "node_modules/@vercel/blob/**"
-    },
-    "api/**/*.js": {
-      "includeFiles": "node_modules/@vercel/blob/**"
     }
   }
 }
