@@ -1,120 +1,77 @@
-name: Byte Ferryman
+name: Byte Ferryman (Serverless API)
 
 on:
-  issues:
-    types: [opened]
-
-permissions:
-  contents: read
-  issues: write
+  repository_dispatch:
+    types: [ferry_trigger]
 
 jobs:
   ferry:
-    if: github.actor == github.repository_owner
     runs-on: ubuntu-latest
     steps:
-      - name: Decode body and download assets
-        id: decode
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Process API Payload and Rebuild Files
+        id: processor
         run: |
           python3 - <<'PY'
           import base64
           import json
           import os
-          import re
-          import urllib.parse
-          import urllib.request
+          import sys
           from pathlib import Path
 
+          # 讀取 GitHub Dispatch 傳入的事件資料
           event_path = os.environ.get("GITHUB_EVENT_PATH")
           with open(event_path, "r", encoding="utf-8") as file_handle:
-            event = json.load(file_handle)
+              event = json.load(file_handle)
 
-          issue = event.get("issue", {})
-          body = issue.get("body") or ""
+          client_payload = event.get("client_payload", {})
+          encoded_msg = client_payload.get("message", "")
+          file_data = client_payload.get("file_data", "")
+          file_name = client_payload.get("file_name", "attachment.bin")
+          title = client_payload.get("title", "Byte Ferryman Mail")
 
-          prefix = "----BEGIN FERRY DATA----"
-          suffix = "----END FERRY DATA----"
-
-          match = re.search(
-            re.escape(prefix) + r"\s*(.*?)\s*" + re.escape(suffix),
-            body,
-            re.S,
-          )
-          if match:
-            payload = re.sub(r"\s+", "", match.group(1))
-            try:
-              decoded = base64.b64decode(payload).decode("utf-8", errors="replace")
-            except Exception as exc:
-              decoded = f"[Decode error] {exc}"
+          # 1. 解密文字內文
+          if encoded_msg:
+              try:
+                  decoded_msg = base64.b64decode(encoded_msg).decode("utf-8", errors="replace")
+              except Exception as e:
+                  decoded_msg = f"[Decode text error] {e}"
           else:
-            decoded = "[No ferry payload found]"
+              decoded_msg = "[No text content provided]"
 
-          # 💡 修正點 1：擴充匹配規則，加入 github.com/user-attachments/ 網址路徑
-          url_pattern = re.compile(
-            r"https://github\.com/[^\s)]+/assets/[^\s)]+|"
-            r"https://github\.com/user-attachments/files/[^\s)]+|"
-            r"https://github-production-user-asset-[^\s)]+",
-            re.I,
-          )
-
-          urls = []
-          for raw_url in url_pattern.findall(body):
-            # 移除 Markdown 語法結尾的右括號或常見標點
-            cleaned = raw_url.split(')')[0].split(']')[0].rstrip(".,>")
-            if cleaned not in urls:
-              urls.append(cleaned)
-
+          # 2. 還原實體檔案附件
           download_dir = Path("downloads")
           download_dir.mkdir(exist_ok=True)
+          has_attachments = "false"
 
-          token = os.environ.get("GITHUB_TOKEN", "")
-          downloaded = []
+          if file_data:
+              try:
+                  file_bytes = base64.b64decode(file_data)
+                  # 預防安全問題，清洗檔名
+                  safe_file_name = Path(file_name).name
+                  dest_path = download_dir / safe_file_name
+                  dest_path.write_bytes(file_bytes)
+                  has_attachments = "true"
+                  print(f"Successfully restored file: {safe_file_name} ({len(file_bytes)} bytes)")
+              except Exception as e:
+                  print(f"Failed to restore file: {e}")
 
-          def safe_name(name: str, index: int) -> str:
-            if not name or name in {".", "/"}:
-              return f"asset_{index}"
-            return name
-
-          for index, url in enumerate(urls, start=1):
-            parsed = urllib.parse.urlparse(url)
-            name = safe_name(Path(parsed.path).name, index)
-            dest = download_dir / f"{index:02d}_{name}"
-
-            # 💡 修正點 2：加入 User-Agent 偽裝瀏覽器，防止 GitHub 直接阻擋無標頭下載
-            request = urllib.request.Request(url)
-            request.add_header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
-            
-            if token and "github" in url.lower():
-              request.add_header("Authorization", f"token {token}")
-
-            try:
-              print(f"Downloading: {url}")
-              with urllib.request.urlopen(request) as response:
-                dest.write_bytes(response.read())
-              downloaded.append(str(dest))
-              print(f"-> Success: {dest} ({dest.stat().st_size} bytes)")
-            except Exception as exc:
-              print(f"-> Failed: {url} -> {exc}")
-
-          has_attachments = any(download_dir.iterdir()) if download_dir.exists() else False
-
+          # 3. 輸出結果供後續發信步驟使用
           output_path = os.environ.get("GITHUB_OUTPUT")
           if output_path:
-            with open(output_path, "a", encoding="utf-8") as output:
-              output.write(f"has_attachments={'true' if has_attachments else 'false'}\n")
-              output.write("body<<EOF\n")
-              output.write(decoded)
-              output.write("\nEOF\n")
-              if has_attachments:
-                output.write("attachments=downloads/*\n")
-              else:
-                output.write("attachments=\n")
+              with open(output_path, "a", encoding="utf-8") as output:
+                  output.write(f"has_attachments={has_attachments}\n")
+                  output.write(f"mail_subject={title}\n")
+                  output.write("mail_body<<EOF\n")
+                  output.write(decoded_msg)
+                  output.write("\nEOF\n")
+                  if has_attachments == "true":
+                      output.write("attachments=downloads/*\n")
+                  else:
+                      output.write("attachments=\n")
           PY
 
       - name: Send mail (with attachments)
-        if: steps.decode.outputs.has_attachments == 'true'
+        if: steps.processor.outputs.has_attachments == 'true'
         uses: dawidd6/action-send-mail@v3
         with:
           server_address: smtp.gmail.com
@@ -122,14 +79,14 @@ jobs:
           secure: true
           username: ${{ secrets.EMAIL_USERNAME }}
           password: ${{ secrets.EMAIL_PASSWORD }}
-          subject: ${{ github.event.issue.title }}
+          subject: "【擺渡人API通知】${{ steps.processor.outputs.mail_subject }}"
           to: ${{ secrets.EMAIL_TO || secrets.EMAIL_USERNAME }}
           from: ${{ secrets.EMAIL_USERNAME }}
-          body: ${{ steps.decode.outputs.body }}
-          attachments: ${{ steps.decode.outputs.attachments }}
+          body: ${{ steps.processor.outputs.mail_body }}
+          attachments: ${{ steps.processor.outputs.attachments }}
 
       - name: Send mail (no attachments)
-        if: steps.decode.outputs.has_attachments != 'true'
+        if: steps.processor.outputs.has_attachments != 'true'
         uses: dawidd6/action-send-mail@v3
         with:
           server_address: smtp.gmail.com
@@ -137,24 +94,7 @@ jobs:
           secure: true
           username: ${{ secrets.EMAIL_USERNAME }}
           password: ${{ secrets.EMAIL_PASSWORD }}
-          subject: ${{ github.event.issue.title }}
+          subject: "【擺渡人API通知】${{ steps.processor.outputs.mail_subject }}"
           to: ${{ secrets.EMAIL_TO || secrets.EMAIL_USERNAME }}
           from: ${{ secrets.EMAIL_USERNAME }}
-          body: ${{ steps.decode.outputs.body }}
-
-      - name: Wipe issue content
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GH_REPO: ${{ github.repository }}
-          ISSUE_NUMBER: ${{ github.event.issue.number }}
-        run: |
-          gh issue edit "$ISSUE_NUMBER" --title "🚢 Mission Completed" \
-            --body "Content successfully ferried and destroyed. [DATA EXPUNGED]"
-
-      - name: Close issue
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GH_REPO: ${{ github.repository }}
-          ISSUE_NUMBER: ${{ github.event.issue.number }}
-        run: |
-          gh issue close "$ISSUE_NUMBER"
+          body: ${{ steps.processor.outputs.mail_body }}
