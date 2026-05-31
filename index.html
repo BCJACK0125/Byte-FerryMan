@@ -311,7 +311,7 @@
         // 軍規 AES 加密成一團亂碼
         const ciphertext = CryptoJS.AES.encrypt(JSON.stringify(rawPayload), pass).toString();
 
-        status.textContent = "📤 正在上傳加密中繼包 (免登入、傳完即銷毀)...";
+        status.textContent = "📤 正在上傳加密中繼包 (尋找原生 CORS 中轉站)...";
         
         let shareUrl = "";
         try {
@@ -319,50 +319,51 @@
           const formData = new FormData();
           formData.append("file", blob, "ferry.enc");
 
-          // 💡 修正點 1：file.io 的標準上傳網址尾端必須補上斜線「/」，補上後就不會引發 301 重定向，進而完美繞過 CORS 阻擋！
-          const uploadRes = await fetch("https://file.io/", {
+          // 🌟 方案 A：tmpfiles.org (強大且原生支援 CORS，無需代理)
+          const uploadRes = await fetch("https://tmpfiles.org/api/v1/upload", {
             method: "POST",
             body: formData
           });
           
+          if (!uploadRes.ok) throw new Error("tmpfiles.org 伺服器拒絕連線");
           const uploadJson = await uploadRes.json();
           
-          if (uploadJson.success || uploadJson.link) {
-            shareUrl = uploadJson.link; // 取得單次下載連結
-            console.log("中轉站 file.io 上傳成功，連結為:", shareUrl);
+          if (uploadJson.status === "success") {
+            // tmpfiles 官方回傳網址如: https://tmpfiles.org/123/ferry.enc
+            // 為了讓 GitHub Actions 能直接下載實體檔，需自動插入 /dl/
+            shareUrl = uploadJson.data.url.replace("tmpfiles.org/", "tmpfiles.org/dl/"); 
+            console.log("中轉站 tmpfiles 上傳成功，連結為:", shareUrl);
           } else {
-            throw new Error("file.io 拒絕接收此檔案");
+            throw new Error("tmpfiles 拒絕接收此檔案");
           }
         } catch (uploadErr) {
-          console.warn("file.io 上傳失敗，嘗試啟動備用 B 方案 (Catbox 代理模式)...", uploadErr);
+          console.warn("tmpfiles 上傳失敗，啟動備用 B 方案 (uguu.se)...", uploadErr);
           
-          // 💡 修正點 2：Catbox 官方不支援前端直接跨網域讀取 (CORS)，我們改用「no-cors」模式投遞
-          // 雖然網頁 JavaScript 沒辦法直接拿到網址，但資料能順利送達。
-          // 為了完全避開這個問題，我們將 Catbox 升級為使用開源的 CORS 代理伺服器（cors-anywhere / corsproxy）
-          // 或者是直接將網址改為精準投遞：
+          // 🌟 方案 B：uguu.se (開源、無廣告、原生支援 CORS，絕不阻擋前端)
           try {
             const blob = new Blob([ciphertext], { type: "text/plain" });
             const formData = new FormData();
-            formData.append("reqtype", "fileupload");
-            formData.append("fileToUpload", blob, "ferry.enc");
+            // 注意：uguu.se 的 API 規定的接收參數名是 'files[]'
+            formData.append("files[]", blob, "ferry.enc"); 
 
-            // 透過公開的 CORS 代理中轉，完美借道讀取 Catbox 的回傳連結
-            const backupRes = await fetch("https://corsproxy.io/?https://catbox.moe/user/api.php", {
+            const backupRes = await fetch("https://uguu.se/upload.php", {
               method: "POST",
               body: formData
             });
             
-            const backupUrl = await backupRes.text();
-            if (backupUrl && backupUrl.startsWith("https://")) {
-              shareUrl = backupUrl.trim();
-              console.log("備用中轉站 Catbox 上傳成功，連結為:", shareUrl);
+            if (!backupRes.ok) throw new Error("uguu.se 伺服器拒絕連線");
+            const backupJson = await backupRes.json();
+            
+            if (backupJson.success && backupJson.files.length > 0) {
+              shareUrl = backupJson.files[0].url; // 直接取得直連網址
+              console.log("備用中轉站 uguu.se 上傳成功，連結為:", shareUrl);
             } else {
-              throw new Error("備用中轉站也拒絕接收: " + backupUrl);
+              throw new Error("備用中轉站也拒絕接收");
             }
           } catch (backupErr) {
-            status.textContent = "所有中轉站皆被公司網路或 CORS 封鎖";
+            status.textContent = "所有原生中轉站皆被公司網路封鎖";
             console.error(backupErr);
-            alert("❌ 啟航失敗：加密包上傳失敗。這代表瀏覽器的 CORS 機制全面攔截。建議直接重新整理網頁，改用修正斜線後的 file.io 試試看！");
+            alert("❌ 啟航失敗：加密包上傳失敗。這代表你們公司的防火牆把 tmpfiles.org 與 uguu.se 也封鎖了。");
             return;
           }
         }
