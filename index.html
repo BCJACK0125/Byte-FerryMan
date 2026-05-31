@@ -372,7 +372,10 @@
             status.textContent = `發送失敗 (${response.status})`;
           }
         } catch (error) {
-          status.textContent = "網路連section異常";
+          status.textContent = "網路連線異常";
+          // 💡 這行能幫我們在 F12 主控台印出真正的錯誤原因！
+          console.error("詳細錯誤紀錄:", error);
+          alert("發生網路連線錯誤，請按 F12 查看 Console 主控台詳細訊息：" + error.message);
         }
       });
     </script>
