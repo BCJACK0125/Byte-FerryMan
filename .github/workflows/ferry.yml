@@ -1,15 +1,23 @@
-name: Byte Ferryman (Serverless API)
+name: Byte Ferryman (Secure Crypto Edition)
 
 on:
   repository_dispatch:
-    types: [ferry_trigger]
+    types: [ferry_secure_trigger]
 
 jobs:
   ferry:
     runs-on: ubuntu-latest
     steps:
-      - name: Process API Payload and Rebuild Files
+      # 在 Ubuntu 容器中安裝 Python 的加密庫
+      - name: Install PyCryptodome for AES Decryption
+        run: |
+          pip install pycryptodome
+
+      - name: Decrypt Payload and Extract Assets
         id: processor
+        env:
+          # 💡 這一步會讀取你藏在儲存庫後台的自訂密碼
+          FERRY_SECRET_PASS: ${{ secrets.FERRY_SECRET_PASS }}
         run: |
           python3 - <<'PY'
           import base64
@@ -17,28 +25,84 @@ jobs:
           import os
           import sys
           from pathlib import Path
+          
+          # 引入 AES 解密相關庫（相容 CryptoJS 的 OpenSSL KDF 格式）
+          from Crypto.Cipher import AES
+          from Crypto.Protocol.KDF import PBKDF1
+          from Crypto.Hash import MD5
 
-          # 讀取 GitHub Dispatch 傳入的事件資料
+          # 1. 讀取 API 傳入的密文 blob
           event_path = os.environ.get("GITHUB_EVENT_PATH")
           with open(event_path, "r", encoding="utf-8") as file_handle:
               event = json.load(file_handle)
 
           client_payload = event.get("client_payload", {})
-          encoded_msg = client_payload.get("message", "")
-          file_data = client_payload.get("file_data", "")
-          file_name = client_payload.get("file_name", "attachment.bin")
-          title = client_payload.get("title", "Byte Ferryman Mail")
+          secure_blob = client_payload.get("secure_blob", "")
 
-          # 1. 解密文字內文
+          # 2. 讀取安全後台的密碼
+          secret_password = os.environ.get("FERRY_SECRET_PASS", "").strip()
+
+          if not secure_blob or not secret_password:
+              print("❌ 錯誤：密文或後台密碼未設定。")
+              sys.exit(1)
+
+          # 解密 CryptoJS AES 格式的函數
+          def decrypt_cryptojs(ciphertext_str, password_str):
+              try:
+                  data = base64.b64decode(ciphertext_str)
+                  if data[:8] != b'Salted__':
+                      return None
+                  salt = data[8:16]
+                  ciphertext = data[16:]
+                  
+                  # 衍生密鑰與初始化向量 (OpenSSL 相容模式)
+                  data_deriv = b""
+                  last = b""
+                  while len(data_deriv) < 48: # 32 bytes key + 16 bytes iv
+                      last = MD5.new(last + password_str.encode('utf-8') + salt).digest()
+                      data_deriv += last
+                  
+                  key = data_deriv[:32]
+                  iv = data_deriv[32:48]
+                  
+                  cipher = AES.new(key, AES.MODE_CBC, iv)
+                  decrypted = cipher.decrypt(ciphertext)
+                  # 移除 PKCS7 Padding
+                  pad_len = decrypted[-1]
+                  if pad_len < 1 or pad_len > 16:
+                      return None
+                  return decrypted[:-pad_len].decode('utf-8')
+              except Exception:
+                  return None
+
+          # 執行解密
+          decrypted_raw = decrypt_cryptojs(secure_blob, secret_password)
+
+          if decrypted_raw is None:
+              print("🔥 [警告]：密碼錯誤或收到惡意垃圾請求！Actions 已成功攔截並安全終止。")
+              sys.exit(1) # 💡 這裡會讓 Actions 直接中斷，不會走接下來的寄信步驟
+
+          # 3. 解析解密後的 JSON 資料
+          try:
+              data_package = json.loads(decrypted_raw)
+          except Exception as e:
+              print("❌ 資料格式解析失敗。")
+              sys.exit(1)
+
+          title = data_package.get("title", "Byte Ferryman Safe Mail")
+          encoded_msg = data_package.get("message", "")
+          file_data = data_package.get("file_data", "")
+          file_name = data_package.get("file_name", "attachment.bin")
+
+          # 4. 處理內文與實體檔案
           if encoded_msg:
               try:
                   decoded_msg = base64.b64decode(encoded_msg).decode("utf-8", errors="replace")
-              except Exception as e:
-                  decoded_msg = f"[Decode text error] {e}"
+              except Exception:
+                  decoded_msg = "[Text decode error]"
           else:
-              decoded_msg = "[No text content provided]"
+              decoded_msg = "[No text content]"
 
-          # 2. 還原實體檔案附件
           download_dir = Path("downloads")
           download_dir.mkdir(exist_ok=True)
           has_attachments = "false"
@@ -46,16 +110,15 @@ jobs:
           if file_data:
               try:
                   file_bytes = base64.b64decode(file_data)
-                  # 預防安全問題，清洗檔名
-                  safe_file_name = Path(file_name).name
-                  dest_path = download_dir / safe_file_name
+                  safe_name = Path(file_name).name
+                  dest_path = download_dir / safe_name
                   dest_path.write_bytes(file_bytes)
                   has_attachments = "true"
-                  print(f"Successfully restored file: {safe_file_name} ({len(file_bytes)} bytes)")
+                  print(f"解密並成功恢復檔案: {safe_name}")
               except Exception as e:
-                  print(f"Failed to restore file: {e}")
+                  print(f"檔案恢復失敗: {e}")
 
-          # 3. 輸出結果供後續發信步驟使用
+          # 5. 輸出給郵件模組
           output_path = os.environ.get("GITHUB_OUTPUT")
           if output_path:
               with open(output_path, "a", encoding="utf-8") as output:
@@ -68,6 +131,7 @@ jobs:
                       output.write("attachments=downloads/*\n")
                   else:
                       output.write("attachments=\n")
+          print("✅ 安全密碼驗證通過，準備發送郵件！")
           PY
 
       - name: Send mail (with attachments)
@@ -79,7 +143,7 @@ jobs:
           secure: true
           username: ${{ secrets.EMAIL_USERNAME }}
           password: ${{ secrets.EMAIL_PASSWORD }}
-          subject: "【擺渡人API通知】${{ steps.processor.outputs.mail_subject }}"
+          subject: "🔒【極致安全擺渡】${{ steps.processor.outputs.mail_subject }}"
           to: ${{ secrets.EMAIL_TO || secrets.EMAIL_USERNAME }}
           from: ${{ secrets.EMAIL_USERNAME }}
           body: ${{ steps.processor.outputs.mail_body }}
@@ -94,7 +158,7 @@ jobs:
           secure: true
           username: ${{ secrets.EMAIL_USERNAME }}
           password: ${{ secrets.EMAIL_PASSWORD }}
-          subject: "【擺渡人API通知】${{ steps.processor.outputs.mail_subject }}"
+          subject: "🔒【極致安全擺渡】${{ steps.processor.outputs.mail_subject }}"
           to: ${{ secrets.EMAIL_TO || secrets.EMAIL_USERNAME }}
           from: ${{ secrets.EMAIL_USERNAME }}
           body: ${{ steps.processor.outputs.mail_body }}
