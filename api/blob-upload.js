@@ -4,7 +4,10 @@ const ALLOWED_ORIGIN = process.env.ALLOWED_ORIGIN || "*";
 function setCors(res) {
   res.setHeader("Access-Control-Allow-Origin", ALLOWED_ORIGIN);
   res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
-  res.setHeader("Access-Control-Allow-Headers", "content-type, x-vercel-blob-action");
+  res.setHeader(
+    "Access-Control-Allow-Headers",
+    "content-type, x-vercel-blob-action, x-vercel-blob-allowed-content-types, x-vercel-blob-maximum-size, x-vercel-blob-token"
+  );
   res.setHeader("Access-Control-Max-Age", "86400");
 }
 
@@ -43,25 +46,20 @@ module.exports = async (req, res) => {
 
   let handleUpload = null;
   try {
-    const blobServer = require("@vercel/blob/server");
+    const blobServer = await import("@vercel/blob/server");
     handleUpload =
       blobServer.handleUpload ||
       blobServer.default?.handleUpload ||
       blobServer.default ||
-      blobServer;
+      null;
   } catch (error) {
-    try {
-      const blobRoot = require("@vercel/blob");
-      handleUpload = blobRoot.handleUpload || blobRoot.default?.handleUpload || null;
-    } catch (innerError) {
-      res.setHeader("Content-Type", "application/json");
-      res.statusCode = 500;
-      res.end(JSON.stringify({
-        error: "Missing @vercel/blob/server. Ensure @vercel/blob is installed.",
-        detail: innerError?.message || "Module not found"
-      }));
-      return;
-    }
+    res.setHeader("Content-Type", "application/json");
+    res.statusCode = 500;
+    res.end(JSON.stringify({
+      error: "Failed to load @vercel/blob/server",
+      detail: error?.message || "Module import failed"
+    }));
+    return;
   }
 
   if (typeof handleUpload !== "function") {
