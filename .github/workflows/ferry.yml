@@ -22,6 +22,7 @@ jobs:
           import json
           import os
           import sys
+          import urllib.parse
           import urllib.request
           from pathlib import Path
           
@@ -42,16 +43,67 @@ jobs:
               print("❌ 錯誤：未收到中轉連結或後台密碼未設定。")
               sys.exit(1)
 
-          # 2. 從 file.io 臨時中轉站下載加密密文字串
-          # 從中轉站下載加密密文字串
-          try:
-              print(f"Downloading ciphertext from secure relay: {secure_url}")
-              req = urllib.request.Request(secure_url, headers={'User-Agent': 'Mozilla/5.0'})
-              with urllib.request.urlopen(req) as response:
-                  # .strip() 可以完美抹除 catbox 或 file.io 結尾可能夾帶的換行符
-                  secure_blob = response.read().decode('utf-8').strip() 
-          except Exception as e:
-              print(f"❌ 密文下載失敗：{e}")
+          def looks_like_ciphertext(text_value):
+              if not text_value:
+                  return False
+              if text_value.startswith("U2FsdGVkX1"):
+                  return True
+              try:
+                  raw = base64.b64decode(text_value)
+              except Exception:
+                  return False
+              return raw.startswith(b"Salted__")
+
+          def build_url_variants(url_value):
+              variants = []
+
+              def add(candidate):
+                  if candidate and candidate not in variants:
+                      variants.append(candidate)
+
+              add(url_value)
+
+              if "tmpfiles.org" in url_value:
+                  if "/dl/" not in url_value:
+                      add(url_value.replace("tmpfiles.org/", "tmpfiles.org/dl/"))
+                  if "download=1" not in url_value:
+                      add(f"{url_value}?download=1")
+
+                  parsed = urllib.parse.urlsplit(url_value)
+                  if "/dl/" in parsed.path:
+                      parts = parsed.path.split("/")
+                      if len(parts) >= 4:
+                          stripped_path = "/".join(parts[:3])
+                          add(urllib.parse.urlunsplit((parsed.scheme, parsed.netloc, stripped_path, parsed.query, parsed.fragment)))
+
+              return variants
+
+          def download_text(url_value):
+              headers = {
+                  "User-Agent": "Mozilla/5.0",
+                  "Accept": "text/plain,application/octet-stream,*/*"
+              }
+              req = urllib.request.Request(url_value, headers=headers)
+              with urllib.request.urlopen(req, timeout=30) as response:
+                  return response.read().decode("utf-8", errors="replace").strip()
+
+          # 2. 從中轉站下載加密密文字串（嘗試多種網址變體）
+          secure_blob = ""
+          last_error = None
+
+          for candidate_url in build_url_variants(secure_url):
+              try:
+                  print(f"Downloading ciphertext from secure relay: {candidate_url}")
+                  candidate_blob = download_text(candidate_url)
+                  if looks_like_ciphertext(candidate_blob):
+                      secure_blob = candidate_blob
+                      break
+                  print("⚠️ 下載內容非加密格式，嘗試其他網址變體。")
+              except Exception as e:
+                  last_error = e
+
+          if not secure_blob:
+              print(f"❌ 密文下載失敗：{last_error}")
               sys.exit(1)
 
           # 解密 CryptoJS AES 格式的函數
