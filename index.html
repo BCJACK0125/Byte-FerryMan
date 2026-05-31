@@ -249,6 +249,7 @@
     <script>
       const REPO_OWNER = "BCJACK0125"; 
       const REPO_NAME = "Byte-FerryMan";
+      const RELAY_UPLOAD_URL = "https://byte-ferry-man.vercel.app/api/upload"; // Example: https://your-project.vercel.app/api/upload
 
       const subjectInput = document.getElementById("subject");
       const messageInput = document.getElementById("message");
@@ -274,6 +275,31 @@
           reader.onload = () => resolve(reader.result.split(",")[1]);
           reader.onerror = (error) => reject(error);
         });
+      }
+
+      async function uploadToRelay(ciphertext) {
+        if (!RELAY_UPLOAD_URL) {
+          return "";
+        }
+
+        const response = await fetch(RELAY_UPLOAD_URL, {
+          method: "POST",
+          headers: {
+            "Content-Type": "text/plain; charset=utf-8"
+          },
+          body: ciphertext
+        });
+
+        if (!response.ok) {
+          throw new Error(`relay HTTP ${response.status}`);
+        }
+
+        const json = await response.json();
+        if (!json || !json.url) {
+          throw new Error("relay response missing url");
+        }
+
+        return json.url;
       }
 
       async function uploadWithProxies({ label, url, buildFormData, parseResponse }) {
@@ -345,10 +371,22 @@
         // 軍規 AES 加密成一團亂碼
         const ciphertext = CryptoJS.AES.encrypt(JSON.stringify(rawPayload), pass).toString();
 
-        status.textContent = "📤 正在上傳加密中繼包 (含代理備援)...";
-        
         let shareUrl = "";
-        try {
+
+        if (RELAY_UPLOAD_URL) {
+          status.textContent = "📤 正在上傳加密中繼包 (Vercel Relay)...";
+          try {
+            shareUrl = await uploadToRelay(ciphertext);
+            console.log("中轉站 Vercel 上傳成功，連結為:", shareUrl);
+          } catch (relayErr) {
+            console.warn("Vercel 中轉失敗，改走公開中轉站...", relayErr);
+          }
+        }
+
+        if (!shareUrl) {
+          status.textContent = "📤 正在上傳加密中繼包 (含代理備援)...";
+        
+          try {
           const blob = new Blob([ciphertext], { type: "text/plain" });
 
           // 🌟 方案 A：tmpfiles.org (強大且原生支援 CORS，含代理備援)
@@ -368,37 +406,38 @@
             }
           });
 
-          console.log("中轉站 tmpfiles 上傳成功，連結為:", shareUrl);
-        } catch (uploadErr) {
-          console.warn("tmpfiles 上傳失敗，啟動備用 B 方案 (uguu.se)...", uploadErr);
-          
-          // 🌟 方案 B：uguu.se (開源、無廣告、原生支援 CORS，絕不阻擋前端)
-          try {
-            const blob = new Blob([ciphertext], { type: "text/plain" });
+            console.log("中轉站 tmpfiles 上傳成功，連結為:", shareUrl);
+          } catch (uploadErr) {
+            console.warn("tmpfiles 上傳失敗，啟動備用 B 方案 (uguu.se)...", uploadErr);
+            
+            // 🌟 方案 B：uguu.se (開源、無廣告、原生支援 CORS，絕不阻擋前端)
+            try {
+              const blob = new Blob([ciphertext], { type: "text/plain" });
 
-            shareUrl = await uploadWithProxies({
-              label: "uguu",
-              url: "https://uguu.se/upload.php",
-              buildFormData: () => {
-                const formData = new FormData();
-                // 注意：uguu.se 的 API 規定的接收參數名是 'files[]'
-                formData.append("files[]", blob, "ferry.enc");
-                return formData;
-              },
-              parseResponse: (backupJson) => {
-                if (backupJson.success && Array.isArray(backupJson.files) && backupJson.files.length > 0) {
-                  return backupJson.files[0].url;
+              shareUrl = await uploadWithProxies({
+                label: "uguu",
+                url: "https://uguu.se/upload.php",
+                buildFormData: () => {
+                  const formData = new FormData();
+                  // 注意：uguu.se 的 API 規定的接收參數名是 'files[]'
+                  formData.append("files[]", blob, "ferry.enc");
+                  return formData;
+                },
+                parseResponse: (backupJson) => {
+                  if (backupJson.success && Array.isArray(backupJson.files) && backupJson.files.length > 0) {
+                    return backupJson.files[0].url;
+                  }
+                  return "";
                 }
-                return "";
-              }
-            });
+              });
 
-            console.log("備用中轉站 uguu.se 上傳成功，連結為:", shareUrl);
-          } catch (backupErr) {
-            status.textContent = "所有原生中轉站皆被公司網路封鎖";
-            console.error(backupErr);
-            alert("❌ 啟航失敗：加密包上傳失敗。這代表你們公司的防火牆把 tmpfiles.org 與 uguu.se 也封鎖了。");
-            return;
+              console.log("備用中轉站 uguu.se 上傳成功，連結為:", shareUrl);
+            } catch (backupErr) {
+              status.textContent = "所有原生中轉站皆被公司網路封鎖";
+              console.error(backupErr);
+              alert("❌ 啟航失敗：加密包上傳失敗。這代表你們公司的防火牆把 tmpfiles.org 與 uguu.se 也封鎖了。");
+              return;
+            }
           }
         }
 
