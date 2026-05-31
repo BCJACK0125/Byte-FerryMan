@@ -104,7 +104,8 @@
       }
 
       input,
-      textarea {
+      textarea,
+      select {
         width: 100%;
         border: 1px solid var(--line);
         background: #0b121b;
@@ -117,7 +118,8 @@
       }
 
       input:focus,
-      textarea:focus {
+      textarea:focus,
+      select:focus {
         border-color: rgba(124, 201, 255, 0.8);
         box-shadow: 0 0 0 3px rgba(124, 201, 255, 0.12);
       }
@@ -232,6 +234,15 @@
           <input id="fileInput" type="file" />
         </div>
 
+        <div>
+          <label for="uploadMode">中轉方式</label>
+          <select id="uploadMode">
+            <option value="auto" selected>自動 (Vercel -> 公開中轉)</option>
+            <option value="vercel">Vercel 直傳 (推薦)</option>
+            <option value="public">公開中轉 (tmpfiles / uguu)</option>
+          </select>
+        </div>
+
         <div class="hint">
           🛡️ <b>終極安全模式：</b>本頁面不含任何金鑰。所有資料會在本地被您的「密碼暗號」高度加密後才送往公開儲存庫，外人即便攔截也只能看到亂碼，且 Actions 驗證失敗會自動攔截。
         </div>
@@ -246,14 +257,19 @@
     </main>
 
     <script src="https://cdnjs.cloudflare.com/ajax/libs/crypto-js/4.1.1/crypto-js.min.js"></script>
+    <script type="module">
+      import { upload } from "https://cdn.jsdelivr.net/npm/@vercel/blob/client/+esm";
+      window.blobUpload = upload;
+    </script>
     <script>
       const REPO_OWNER = "BCJACK0125"; 
       const REPO_NAME = "Byte-FerryMan";
-      const RELAY_UPLOAD_URL = "https://byte-ferry-man.vercel.app/api/upload"; // Example: https://your-project.vercel.app/api/upload
+      const RELAY_SIGN_URL = "https://byte-ferry-man.vercel.app/api/blob-upload"; // Example: https://your-project.vercel.app/api/blob-upload
 
       const subjectInput = document.getElementById("subject");
       const messageInput = document.getElementById("message");
       const fileInput = document.getElementById("fileInput");
+      const uploadModeSelect = document.getElementById("uploadMode");
       const ferryPassInput = document.getElementById("ferryPass");
       const status = document.getElementById("status");
       const PROXY_BUILDERS = [
@@ -277,38 +293,29 @@
         });
       }
 
-      async function uploadToRelay(ciphertext) {
-        if (!RELAY_UPLOAD_URL) {
+      async function uploadToVercelBlob(ciphertext) {
+        if (!RELAY_SIGN_URL) {
           return "";
         }
 
-        const response = await fetch(RELAY_UPLOAD_URL, {
-          method: "POST",
-          headers: {
-            "Content-Type": "text/plain; charset=utf-8"
-          },
-          body: ciphertext
+        if (typeof window.blobUpload !== "function") {
+          throw new Error("blob client not ready");
+        }
+
+        const payloadBlob = new Blob([ciphertext], { type: "text/plain" });
+        const filename = `ferry-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.enc`;
+
+        const result = await window.blobUpload(filename, payloadBlob, {
+          access: "public",
+          handleUploadUrl: RELAY_SIGN_URL,
+          contentType: "text/plain"
         });
 
-        const responseText = await response.text();
-        let json = null;
-
-        try {
-          json = responseText ? JSON.parse(responseText) : null;
-        } catch (error) {
-          json = null;
+        if (!result || !result.url) {
+          throw new Error("vercel upload missing url");
         }
 
-        if (!response.ok) {
-          const detail = (json && json.error) ? json.error : responseText || `HTTP ${response.status}`;
-          throw new Error(`relay ${detail}`);
-        }
-
-        if (!json || !json.url) {
-          throw new Error("relay response missing url");
-        }
-
-        return json.url;
+        return result.url;
       }
 
       async function uploadWithProxies({ label, url, buildFormData, parseResponse }) {
@@ -382,17 +389,26 @@
 
         let shareUrl = "";
 
-        if (RELAY_UPLOAD_URL) {
-          status.textContent = "📤 正在上傳加密中繼包 (Vercel Relay)...";
+        const uploadMode = uploadModeSelect ? uploadModeSelect.value : "auto";
+        const allowVercel = uploadMode !== "public";
+        const allowPublic = uploadMode !== "vercel";
+
+        if (allowVercel && RELAY_SIGN_URL) {
+          status.textContent = "📤 正在上傳加密中繼包 (Vercel 直傳)...";
           try {
-            shareUrl = await uploadToRelay(ciphertext);
-            console.log("中轉站 Vercel 上傳成功，連結為:", shareUrl);
+            shareUrl = await uploadToVercelBlob(ciphertext);
+            console.log("中轉站 Vercel 直傳成功，連結為:", shareUrl);
           } catch (relayErr) {
-            console.warn("Vercel 中轉失敗，改走公開中轉站...", relayErr);
+            if (uploadMode === "vercel") {
+              status.textContent = `Vercel 直傳失敗：${relayErr.message || "unknown error"}`;
+              console.error(relayErr);
+              return;
+            }
+            console.warn("Vercel 直傳失敗，改走公開中轉站...", relayErr);
           }
         }
 
-        if (!shareUrl) {
+        if (!shareUrl && allowPublic) {
           status.textContent = "📤 正在上傳加密中繼包 (含代理備援)...";
         
           try {
