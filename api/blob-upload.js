@@ -4,7 +4,7 @@ const ALLOWED_ORIGIN = process.env.ALLOWED_ORIGIN || "*";
 function setCors(res) {
   res.setHeader("Access-Control-Allow-Origin", ALLOWED_ORIGIN);
   res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
-  res.setHeader("Access-Control-Allow-Headers", "content-type");
+  res.setHeader("Access-Control-Allow-Headers", "content-type, x-vercel-blob-action");
   res.setHeader("Access-Control-Max-Age", "86400");
 }
 
@@ -43,10 +43,16 @@ module.exports = async (req, res) => {
 
   let handleUpload = null;
   try {
-    ({ handleUpload } = require("@vercel/blob/server"));
+    const blobServer = require("@vercel/blob/server");
+    handleUpload =
+      blobServer.handleUpload ||
+      blobServer.default?.handleUpload ||
+      blobServer.default ||
+      blobServer;
   } catch (error) {
     try {
-      ({ handleUpload } = require("@vercel/blob"));
+      const blobRoot = require("@vercel/blob");
+      handleUpload = blobRoot.handleUpload || blobRoot.default?.handleUpload || null;
     } catch (innerError) {
       res.setHeader("Content-Type", "application/json");
       res.statusCode = 500;
@@ -56,6 +62,13 @@ module.exports = async (req, res) => {
       }));
       return;
     }
+  }
+
+  if (typeof handleUpload !== "function") {
+    res.setHeader("Content-Type", "application/json");
+    res.statusCode = 500;
+    res.end(JSON.stringify({ error: "handleUpload is not a function" }));
+    return;
   }
 
   try {
