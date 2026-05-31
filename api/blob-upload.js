@@ -1,5 +1,3 @@
-const { handleUpload } = require("@vercel/blob/server");
-
 const MAX_UPLOAD_BYTES = Number.parseInt(process.env.MAX_UPLOAD_BYTES || "", 10) || 20 * 1024 * 1024;
 const ALLOWED_ORIGIN = process.env.ALLOWED_ORIGIN || "*";
 
@@ -34,6 +32,23 @@ module.exports = async (req, res) => {
     res.statusCode = 405;
     res.end("Method Not Allowed");
     return;
+  }
+
+  let handleUpload = null;
+  try {
+    ({ handleUpload } = require("@vercel/blob/server"));
+  } catch (error) {
+    try {
+      ({ handleUpload } = require("@vercel/blob"));
+    } catch (innerError) {
+      res.setHeader("Content-Type", "application/json");
+      res.statusCode = 500;
+      res.end(JSON.stringify({
+        error: "Missing @vercel/blob/server. Ensure @vercel/blob is installed.",
+        detail: innerError?.message || "Module not found"
+      }));
+      return;
+    }
   }
 
   try {
