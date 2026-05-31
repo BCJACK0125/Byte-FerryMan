@@ -1,0 +1,154 @@
+name: Byte Ferryman
+
+on:
+  issues:
+    types: [opened]
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  ferry:
+    if: github.actor == github.repository_owner
+    runs-on: ubuntu-latest
+    steps:
+      - name: Decode body and download assets
+        id: decode
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          python3 - <<'PY'
+          import base64
+          import json
+          import os
+          import re
+          import urllib.parse
+          import urllib.request
+          from pathlib import Path
+
+          event_path = os.environ.get("GITHUB_EVENT_PATH")
+          with open(event_path, "r", encoding="utf-8") as file_handle:
+            event = json.load(file_handle)
+
+          issue = event.get("issue", {})
+          body = issue.get("body") or ""
+
+          prefix = "----BEGIN FERRY DATA----"
+          suffix = "----END FERRY DATA----"
+
+          match = re.search(
+            re.escape(prefix) + r"\s*(.*?)\s*" + re.escape(suffix),
+            body,
+            re.S,
+          )
+          if match:
+            payload = re.sub(r"\s+", "", match.group(1))
+            try:
+              decoded = base64.b64decode(payload).decode("utf-8", errors="replace")
+            except Exception as exc:
+              decoded = f"[Decode error] {exc}"
+          else:
+            decoded = "[No ferry payload found]"
+
+          url_pattern = re.compile(
+            r"https://github\.com/[^\s)]+/assets/[^\s)]+|"
+            r"https://github-production-user-asset-[^\s)]+",
+            re.I,
+          )
+
+          urls = []
+          for raw_url in url_pattern.findall(body):
+            cleaned = raw_url.rstrip(").,]>")
+            if cleaned not in urls:
+              urls.append(cleaned)
+
+          download_dir = Path("downloads")
+          download_dir.mkdir(exist_ok=True)
+
+          token = os.environ.get("GITHUB_TOKEN", "")
+          downloaded = []
+
+          def safe_name(name: str, index: int) -> str:
+            if not name or name in {".", "/"}:
+              return f"asset_{index}"
+            return name
+
+          for index, url in enumerate(urls, start=1):
+            parsed = urllib.parse.urlparse(url)
+            name = safe_name(Path(parsed.path).name, index)
+            dest = download_dir / f"{index:02d}_{name}"
+
+            request = urllib.request.Request(url)
+            if token:
+              request.add_header("Authorization", f"token {token}")
+              request.add_header("Accept", "application/octet-stream")
+
+            try:
+              with urllib.request.urlopen(request) as response:
+                dest.write_bytes(response.read())
+              downloaded.append(str(dest))
+              print(f"Downloaded: {url} -> {dest}")
+            except Exception as exc:
+              print(f"Download failed: {url} -> {exc}")
+
+          has_attachments = any(download_dir.iterdir()) if download_dir.exists() else False
+
+          output_path = os.environ.get("GITHUB_OUTPUT")
+          if output_path:
+            with open(output_path, "a", encoding="utf-8") as output:
+              output.write(f"has_attachments={'true' if has_attachments else 'false'}\n")
+              output.write("body<<EOF\n")
+              output.write(decoded)
+              output.write("\nEOF\n")
+              if has_attachments:
+                output.write("attachments=downloads/*\n")
+              else:
+                output.write("attachments=\n")
+          PY
+
+      - name: Send mail (with attachments)
+        if: steps.decode.outputs.has_attachments == 'true'
+        uses: dawidd6/action-send-mail@v3
+        with:
+          server_address: smtp.gmail.com
+          server_port: 465
+          secure: true
+          username: ${{ secrets.EMAIL_USERNAME }}
+          password: ${{ secrets.EMAIL_PASSWORD }}
+          subject: ${{ github.event.issue.title }}
+          to: ${{ secrets.EMAIL_TO || secrets.EMAIL_USERNAME }}
+          from: ${{ secrets.EMAIL_USERNAME }}
+          body: ${{ steps.decode.outputs.body }}
+          attachments: ${{ steps.decode.outputs.attachments }}
+
+      - name: Send mail (no attachments)
+        if: steps.decode.outputs.has_attachments != 'true'
+        uses: dawidd6/action-send-mail@v3
+        with:
+          server_address: smtp.gmail.com
+          server_port: 465
+          secure: true
+          username: ${{ secrets.EMAIL_USERNAME }}
+          password: ${{ secrets.EMAIL_PASSWORD }}
+          subject: ${{ github.event.issue.title }}
+          to: ${{ secrets.EMAIL_TO || secrets.EMAIL_USERNAME }}
+          from: ${{ secrets.EMAIL_USERNAME }}
+          body: ${{ steps.decode.outputs.body }}
+
+      - name: Wipe issue content
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+        run: |
+          gh issue edit "$ISSUE_NUMBER" --title "🚢 Mission Completed" \
+            --body "Content successfully ferried and destroyed. [DATA EXPUNGED]"
+
+      - name: Close issue
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+        run: |
+          gh issue close "$ISSUE_NUMBER"

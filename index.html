@@ -1,0 +1,283 @@
+<!doctype html>
+<html lang="zh-Hant">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>位元擺渡人 / Byte Ferryman</title>
+    <style>
+      :root {
+        --bg-1: #0b0f14;
+        --bg-2: #0f1a22;
+        --card: #111926;
+        --ink: #e6ecf2;
+        --muted: #a6b2c1;
+        --line: #253244;
+        --accent: #7cc9ff;
+        --accent-2: #5ef2c5;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        font-family: "IBM Plex Sans", "Noto Sans TC", "Microsoft JhengHei", "PingFang TC",
+          sans-serif;
+        color: var(--ink);
+        background: radial-gradient(1200px 700px at 10% -10%, #182739 0%, transparent 60%),
+          radial-gradient(900px 600px at 100% 0%, #142033 0%, transparent 55%),
+          linear-gradient(180deg, var(--bg-2), var(--bg-1));
+        min-height: 100vh;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 48px 20px 64px;
+        position: relative;
+        overflow-x: hidden;
+      }
+
+      body::before {
+        content: "";
+        position: fixed;
+        inset: -20% -10% auto -10%;
+        height: 320px;
+        background: linear-gradient(90deg, rgba(124, 201, 255, 0.16), rgba(94, 242, 197, 0.08));
+        filter: blur(40px);
+        opacity: 0.7;
+        pointer-events: none;
+      }
+
+      .shell {
+        width: min(900px, 100%);
+        background: rgba(17, 25, 38, 0.9);
+        border: 1px solid var(--line);
+        border-radius: 18px;
+        padding: 32px clamp(22px, 3vw, 36px) 36px;
+        box-shadow: 0 24px 80px rgba(4, 9, 14, 0.6);
+        backdrop-filter: blur(8px);
+        animation: rise 0.6s ease-out;
+      }
+
+      .brand {
+        display: flex;
+        align-items: center;
+        gap: 14px;
+        margin-bottom: 24px;
+      }
+
+      .mark {
+        width: 44px;
+        height: 44px;
+        border-radius: 12px;
+        background: linear-gradient(135deg, rgba(124, 201, 255, 0.8), rgba(94, 242, 197, 0.8));
+        display: grid;
+        place-items: center;
+        color: #091018;
+        font-weight: 700;
+        letter-spacing: 1px;
+      }
+
+      h1 {
+        margin: 0;
+        font-size: clamp(24px, 4vw, 32px);
+        letter-spacing: 0.4px;
+      }
+
+      .subtitle {
+        margin: 6px 0 0;
+        color: var(--muted);
+        font-size: 14px;
+      }
+
+      .grid {
+        display: grid;
+        gap: 18px;
+      }
+
+      label {
+        font-size: 13px;
+        color: var(--muted);
+        display: block;
+        margin-bottom: 8px;
+        letter-spacing: 0.2px;
+      }
+
+      input,
+      textarea {
+        width: 100%;
+        border: 1px solid var(--line);
+        background: #0b121b;
+        color: var(--ink);
+        border-radius: 12px;
+        padding: 12px 14px;
+        font-size: 15px;
+        outline: none;
+        transition: border 0.2s ease, box-shadow 0.2s ease;
+      }
+
+      input:focus,
+      textarea:focus {
+        border-color: rgba(124, 201, 255, 0.8);
+        box-shadow: 0 0 0 3px rgba(124, 201, 255, 0.12);
+      }
+
+      textarea {
+        min-height: 180px;
+        resize: vertical;
+        line-height: 1.6;
+      }
+
+      .hint {
+        border: 1px dashed rgba(124, 201, 255, 0.35);
+        background: rgba(12, 20, 30, 0.8);
+        padding: 14px 16px;
+        border-radius: 14px;
+        color: var(--muted);
+        font-size: 13px;
+        line-height: 1.6;
+      }
+
+      .actions {
+        display: flex;
+        align-items: center;
+        gap: 16px;
+        flex-wrap: wrap;
+      }
+
+      button {
+        border: none;
+        background: linear-gradient(120deg, var(--accent), var(--accent-2));
+        color: #0b1118;
+        padding: 12px 28px;
+        font-size: 15px;
+        font-weight: 700;
+        border-radius: 999px;
+        cursor: pointer;
+        box-shadow: 0 10px 24px rgba(124, 201, 255, 0.18);
+        transition: transform 0.15s ease, box-shadow 0.2s ease;
+      }
+
+      button:hover {
+        transform: translateY(-1px);
+        box-shadow: 0 14px 26px rgba(124, 201, 255, 0.25);
+      }
+
+      .status {
+        color: var(--muted);
+        font-size: 13px;
+      }
+
+      footer {
+        margin-top: 24px;
+        font-size: 12px;
+        color: rgba(166, 178, 193, 0.7);
+      }
+
+      @keyframes rise {
+        from {
+          opacity: 0;
+          transform: translateY(12px);
+        }
+        to {
+          opacity: 1;
+          transform: translateY(0);
+        }
+      }
+
+      @media (max-width: 640px) {
+        .shell {
+          padding: 26px 18px 30px;
+        }
+
+        .actions {
+          flex-direction: column;
+          align-items: stretch;
+        }
+
+        button {
+          width: 100%;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main class="shell">
+      <header class="brand">
+        <div class="mark">BF</div>
+        <div>
+          <h1>位元擺渡人 / Byte Ferryman</h1>
+          <p class="subtitle">私用擺渡介面</p>
+        </div>
+      </header>
+
+      <section class="grid">
+        <div>
+          <label for="subject">信件主旨</label>
+          <input id="subject" type="text" placeholder="輸入主旨" autocomplete="off" />
+        </div>
+
+        <div>
+          <label for="message">文字內文</label>
+          <textarea id="message" placeholder="輸入要擺渡的內容"></textarea>
+        </div>
+
+        <div class="hint">
+          點擊啟航後，請在開啟的 GitHub Issue 頁面中，手動將 .zip、.pdf 或圖片檔案拖曳至
+          輸入框內，再點擊 Submit。
+        </div>
+
+        <div class="actions">
+          <button id="launch" type="button">啟航</button>
+          <div class="status" id="status">不含任何金鑰與憑證</div>
+        </div>
+      </section>
+
+      <footer>資料會在擺渡完成後清除痕跡。</footer>
+    </main>
+
+    <script>
+      const REPO_OWNER = "YOUR_GITHUB_USERNAME";
+      const REPO_NAME = "Byte_FerryMan";
+
+      const prefix = "----BEGIN FERRY DATA----";
+      const suffix = "----END FERRY DATA----";
+
+      const subjectInput = document.getElementById("subject");
+      const messageInput = document.getElementById("message");
+      const status = document.getElementById("status");
+
+      function base64EncodeUnicode(text) {
+        const bytes = new TextEncoder().encode(text);
+        let binary = "";
+        bytes.forEach((byte) => {
+          binary += String.fromCharCode(byte);
+        });
+        return btoa(binary);
+      }
+
+      function buildIssueUrl(title, body) {
+        const base = `https://github.com/${REPO_OWNER}/${REPO_NAME}/issues/new`;
+        const params = new URLSearchParams({
+          title,
+          body,
+        });
+        return `${base}?${params.toString()}`;
+      }
+
+      document.getElementById("launch").addEventListener("click", () => {
+        const title = subjectInput.value.trim() || "Byte Ferryman";
+        const rawMessage = messageInput.value.trim();
+        const payload = rawMessage ? base64EncodeUnicode(rawMessage) : "";
+
+        const block = `${prefix}\n${payload}\n${suffix}`;
+        const note = "請在此 Issue 內拖曳檔案後再送出。";
+        const body = `${block}\n\n${note}`;
+
+        const url = buildIssueUrl(title, body);
+        status.textContent = "已建立啟航連結";
+        window.open(url, "_blank", "noopener");
+      });
+    </script>
+  </body>
+</html>
