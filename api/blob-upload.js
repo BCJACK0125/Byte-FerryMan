@@ -1,6 +1,20 @@
 const MAX_UPLOAD_BYTES = Number.parseInt(process.env.MAX_UPLOAD_BYTES || "", 10) || 20 * 1024 * 1024;
 const ALLOWED_ORIGIN = process.env.ALLOWED_ORIGIN || "*";
 
+let cachedHandleUpload = null;
+let cachedImportError = null;
+
+try {
+  const blobServer = require("@vercel/blob/server");
+  cachedHandleUpload =
+    blobServer.handleUpload ||
+    blobServer.default?.handleUpload ||
+    blobServer.default ||
+    null;
+} catch (error) {
+  cachedImportError = error;
+}
+
 function setCors(res) {
   res.setHeader("Access-Control-Allow-Origin", ALLOWED_ORIGIN);
   res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
@@ -65,24 +79,17 @@ module.exports = async (req, res) => {
     return;
   }
 
-  let handleUpload = null;
-  try {
-    const blobServer = await import("@vercel/blob/server");
-    handleUpload =
-      blobServer.handleUpload ||
-      blobServer.default?.handleUpload ||
-      blobServer.default ||
-      null;
-  } catch (error) {
+  if (cachedImportError) {
     res.setHeader("Content-Type", "application/json");
     res.statusCode = 500;
     res.end(JSON.stringify({
       error: "Failed to load @vercel/blob/server",
-      detail: error?.message || "Module import failed"
+      detail: cachedImportError?.message || "Module import failed"
     }));
     return;
   }
 
+  const handleUpload = cachedHandleUpload;
   if (typeof handleUpload !== "function") {
     res.setHeader("Content-Type", "application/json");
     res.statusCode = 500;
