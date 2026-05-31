@@ -255,6 +255,10 @@
       const fileInput = document.getElementById("fileInput");
       const ferryPassInput = document.getElementById("ferryPass");
       const status = document.getElementById("status");
+      const PROXY_BUILDERS = [
+        (url) => `https://corsproxy.io/?${encodeURIComponent(url)}`,
+        (url) => `https://cors.isomorphic-git.org/${url}`
+      ];
 
       function base64EncodeUnicode(text) {
         const bytes = new TextEncoder().encode(text);
@@ -270,6 +274,36 @@
           reader.onload = () => resolve(reader.result.split(",")[1]);
           reader.onerror = (error) => reject(error);
         });
+      }
+
+      async function uploadWithProxies({ label, url, buildFormData, parseResponse }) {
+        const targets = [url, ...PROXY_BUILDERS.map((builder) => builder(url))];
+        let lastError = null;
+
+        for (const target of targets) {
+          try {
+            const response = await fetch(target, {
+              method: "POST",
+              body: buildFormData()
+            });
+
+            if (!response.ok) {
+              throw new Error(`${label} HTTP ${response.status}`);
+            }
+
+            const json = await response.json();
+            const resultUrl = parseResponse(json);
+            if (!resultUrl) {
+              throw new Error(`${label} response missing url`);
+            }
+
+            return resultUrl;
+          } catch (error) {
+            lastError = error;
+          }
+        }
+
+        throw lastError ?? new Error(`${label} upload failed`);
       }
 
       document.getElementById("launch").addEventListener("click", async () => {
@@ -311,55 +345,55 @@
         // 軍規 AES 加密成一團亂碼
         const ciphertext = CryptoJS.AES.encrypt(JSON.stringify(rawPayload), pass).toString();
 
-        status.textContent = "📤 正在上傳加密中繼包 (尋找原生 CORS 中轉站)...";
+        status.textContent = "📤 正在上傳加密中繼包 (含代理備援)...";
         
         let shareUrl = "";
         try {
           const blob = new Blob([ciphertext], { type: "text/plain" });
-          const formData = new FormData();
-          formData.append("file", blob, "ferry.enc");
 
-          // 🌟 方案 A：tmpfiles.org (強大且原生支援 CORS，無需代理)
-          const uploadRes = await fetch("https://tmpfiles.org/api/v1/upload", {
-            method: "POST",
-            body: formData
+          // 🌟 方案 A：tmpfiles.org (強大且原生支援 CORS，含代理備援)
+          shareUrl = await uploadWithProxies({
+            label: "tmpfiles",
+            url: "https://tmpfiles.org/api/v1/upload",
+            buildFormData: () => {
+              const formData = new FormData();
+              formData.append("file", blob, "ferry.enc");
+              return formData;
+            },
+            parseResponse: (uploadJson) => {
+              if (uploadJson.status === "success" && uploadJson.data && uploadJson.data.url) {
+                return uploadJson.data.url.replace("tmpfiles.org/", "tmpfiles.org/dl/");
+              }
+              return "";
+            }
           });
-          
-          if (!uploadRes.ok) throw new Error("tmpfiles.org 伺服器拒絕連線");
-          const uploadJson = await uploadRes.json();
-          
-          if (uploadJson.status === "success") {
-            // tmpfiles 官方回傳網址如: https://tmpfiles.org/123/ferry.enc
-            // 為了讓 GitHub Actions 能直接下載實體檔，需自動插入 /dl/
-            shareUrl = uploadJson.data.url.replace("tmpfiles.org/", "tmpfiles.org/dl/"); 
-            console.log("中轉站 tmpfiles 上傳成功，連結為:", shareUrl);
-          } else {
-            throw new Error("tmpfiles 拒絕接收此檔案");
-          }
+
+          console.log("中轉站 tmpfiles 上傳成功，連結為:", shareUrl);
         } catch (uploadErr) {
           console.warn("tmpfiles 上傳失敗，啟動備用 B 方案 (uguu.se)...", uploadErr);
           
           // 🌟 方案 B：uguu.se (開源、無廣告、原生支援 CORS，絕不阻擋前端)
           try {
             const blob = new Blob([ciphertext], { type: "text/plain" });
-            const formData = new FormData();
-            // 注意：uguu.se 的 API 規定的接收參數名是 'files[]'
-            formData.append("files[]", blob, "ferry.enc"); 
 
-            const backupRes = await fetch("https://uguu.se/upload.php", {
-              method: "POST",
-              body: formData
+            shareUrl = await uploadWithProxies({
+              label: "uguu",
+              url: "https://uguu.se/upload.php",
+              buildFormData: () => {
+                const formData = new FormData();
+                // 注意：uguu.se 的 API 規定的接收參數名是 'files[]'
+                formData.append("files[]", blob, "ferry.enc");
+                return formData;
+              },
+              parseResponse: (backupJson) => {
+                if (backupJson.success && Array.isArray(backupJson.files) && backupJson.files.length > 0) {
+                  return backupJson.files[0].url;
+                }
+                return "";
+              }
             });
-            
-            if (!backupRes.ok) throw new Error("uguu.se 伺服器拒絕連線");
-            const backupJson = await backupRes.json();
-            
-            if (backupJson.success && backupJson.files.length > 0) {
-              shareUrl = backupJson.files[0].url; // 直接取得直連網址
-              console.log("備用中轉站 uguu.se 上傳成功，連結為:", shareUrl);
-            } else {
-              throw new Error("備用中轉站也拒絕接收");
-            }
+
+            console.log("備用中轉站 uguu.se 上傳成功，連結為:", shareUrl);
           } catch (backupErr) {
             status.textContent = "所有原生中轉站皆被公司網路封鎖";
             console.error(backupErr);
