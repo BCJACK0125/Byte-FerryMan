@@ -95,6 +95,12 @@ module.exports = async (req, res) => {
     const body = rawBody ? JSON.parse(rawBody) : {};
     const request = buildRequest(req, rawBody);
 
+    console.log("Blob upload request:", {
+      type: body?.type || "(missing)",
+      hasPayload: Boolean(body?.payload),
+      pathname: body?.payload?.pathname || "(missing)"
+    });
+
     const jsonResponse = await handleUpload({
       request,
       body,
@@ -111,7 +117,7 @@ module.exports = async (req, res) => {
     res.statusCode = 200;
     res.end(JSON.stringify(jsonResponse));
   } catch (error) {
-    console.error("Blob upload error:", error);
+    console.error("Blob upload error:", error?.message || error, error?.stack || "");
     res.setHeader("Content-Type", "application/json");
     res.statusCode = 500;
     res.end(JSON.stringify({ error: error?.message || "Upload Token Failed" }));
