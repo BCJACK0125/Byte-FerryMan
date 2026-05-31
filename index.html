@@ -315,27 +315,54 @@
         
         let shareUrl = "";
         try {
-          // 將加密後的亂碼存成文字檔，丟給 file.io 臨時中轉站 (限制單檔 100MB)
           const blob = new Blob([ciphertext], { type: "text/plain" });
           const formData = new FormData();
           formData.append("file", blob, "ferry.enc");
 
-          const uploadRes = await fetch("https://file.io/?expires=1d", {
+          // 💡 修正點 1：使用 file.io 最標準的原生網址，並加上 cors 模式宣告
+          const uploadRes = await fetch("https://file.io", {
             method: "POST",
+            mode: "cors", // 確保瀏覽器允許跨網域傳輸
             body: formData
           });
+          
           const uploadJson = await uploadRes.json();
           
-          if (uploadJson.success) {
-            shareUrl = uploadJson.link; // 拿到類似 https://file.io/xxxxx 的單次下載連結
+          if (uploadJson.success || uploadJson.link) {
+            shareUrl = uploadJson.link; // 取得單次下載連結
+            console.log("中轉站上傳成功，連結為:", shareUrl);
           } else {
-            throw new Error("中轉站拒絕上傳");
+            throw new Error("file.io 拒絕接收此檔案");
           }
         } catch (uploadErr) {
-          status.textContent = "中轉站上傳失敗";
-          console.error(uploadErr);
-          alert("加密包上傳中轉站失敗，可能公司封鎖了 file.io 網域。");
-          return;
+          console.warn("file.io 上傳失敗，嘗試啟動備用 B 方案 (Catbox)...", uploadErr);
+          
+          // 💡 修正點 2：自動啟動強大的備用中轉站方案 (Catbox.moe)
+          try {
+            const blob = new Blob([ciphertext], { type: "text/plain" });
+            const formData = new FormData();
+            formData.append("reqtype", "fileupload");
+            formData.append("fileToUpload", blob, "ferry.enc");
+
+            const backupRes = await fetch("https://catbox.moe/user/api.php", {
+              method: "POST",
+              mode: "cors",
+              body: formData
+            });
+            
+            const backupUrl = await backupRes.text();
+            if (backupUrl && backupUrl.startsWith("https://")) {
+              shareUrl = backupUrl.trim();
+              console.log("備用中轉站 Catbox 上傳成功，連結為:", shareUrl);
+            } else {
+              throw new Error("備用中轉站也拒絕接收: " + backupUrl);
+            }
+          } catch (backupErr) {
+            status.textContent = "所有中轉站皆被公司網路封鎖";
+            console.error(backupErr);
+            alert("❌ 啟航失敗：加密包上傳失敗。這代表你們公司的資安設備非常嚴格，將 file.io 與 catbox 網域都封鎖了。");
+            return;
+          }
         }
 
         status.textContent = "🚀 正在觸發 GitHub 雲端擺渡...";

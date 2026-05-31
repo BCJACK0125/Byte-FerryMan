@@ -43,13 +43,15 @@ jobs:
               sys.exit(1)
 
           # 2. 從 file.io 臨時中轉站下載加密密文字串
+          # 從中轉站下載加密密文字串
           try:
               print(f"Downloading ciphertext from secure relay: {secure_url}")
               req = urllib.request.Request(secure_url, headers={'User-Agent': 'Mozilla/5.0'})
               with urllib.request.urlopen(req) as response:
-                  secure_blob = response.read().decode('utf-8').strip()
+                  # .strip() 可以完美抹除 catbox 或 file.io 結尾可能夾帶的換行符
+                  secure_blob = response.read().decode('utf-8').strip() 
           except Exception as e:
-              print(f"❌ 密文下載失敗（可能已被下載銷毀）：{e}")
+              print(f"❌ 密文下載失敗：{e}")
               sys.exit(1)
 
           # 解密 CryptoJS AES 格式的函數
