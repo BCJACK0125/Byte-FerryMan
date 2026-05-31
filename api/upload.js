@@ -1,6 +1,6 @@
 const { put } = require("@vercel/blob");
 
-const MAX_UPLOAD_BYTES = Number.parseInt(process.env.MAX_UPLOAD_BYTES || "", 10) || 12 * 1024 * 1024;
+const MAX_UPLOAD_BYTES = Number.parseInt(process.env.MAX_UPLOAD_BYTES || "", 10) || 20 * 1024 * 1024;
 const ALLOWED_ORIGIN = process.env.ALLOWED_ORIGIN || "*";
 
 function setCors(res) {
@@ -29,6 +29,13 @@ module.exports = async (req, res) => {
   if (req.method !== "POST") {
     res.statusCode = 405;
     res.end("Method Not Allowed");
+    return;
+  }
+
+  if (!process.env.BLOB_READ_WRITE_TOKEN) {
+    res.setHeader("Content-Type", "application/json");
+    res.statusCode = 500;
+    res.end(JSON.stringify({ error: "Missing BLOB_READ_WRITE_TOKEN" }));
     return;
   }
 
@@ -61,14 +68,16 @@ module.exports = async (req, res) => {
     try {
       const body = Buffer.concat(chunks).toString("utf8").trim();
       if (!body) {
+        res.setHeader("Content-Type", "application/json");
         res.statusCode = 400;
-        res.end("Empty Body");
+        res.end(JSON.stringify({ error: "Empty Body" }));
         return;
       }
 
       if (!looksLikeCiphertext(body)) {
+        res.setHeader("Content-Type", "application/json");
         res.statusCode = 422;
-        res.end("Invalid Ciphertext");
+        res.end(JSON.stringify({ error: "Invalid Ciphertext" }));
         return;
       }
 
@@ -82,15 +91,18 @@ module.exports = async (req, res) => {
       res.statusCode = 200;
       res.end(JSON.stringify({ url: result.url }));
     } catch (error) {
+      console.error("Upload error:", error);
+      res.setHeader("Content-Type", "application/json");
       res.statusCode = 500;
-      res.end("Upload Failed");
+      res.end(JSON.stringify({ error: error?.message || "Upload Failed" }));
     }
   });
 
   req.on("error", () => {
     if (!aborted) {
+      res.setHeader("Content-Type", "application/json");
       res.statusCode = 500;
-      res.end("Request Error");
+      res.end(JSON.stringify({ error: "Request Error" }));
     }
   });
 };

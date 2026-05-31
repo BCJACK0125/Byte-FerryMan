@@ -290,11 +290,20 @@
           body: ciphertext
         });
 
-        if (!response.ok) {
-          throw new Error(`relay HTTP ${response.status}`);
+        const responseText = await response.text();
+        let json = null;
+
+        try {
+          json = responseText ? JSON.parse(responseText) : null;
+        } catch (error) {
+          json = null;
         }
 
-        const json = await response.json();
+        if (!response.ok) {
+          const detail = (json && json.error) ? json.error : responseText || `HTTP ${response.status}`;
+          throw new Error(`relay ${detail}`);
+        }
+
         if (!json || !json.url) {
           throw new Error("relay response missing url");
         }
