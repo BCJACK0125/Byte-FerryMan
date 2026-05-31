@@ -23,14 +23,9 @@ jobs:
           import json
           import os
           import re
-          import time
           import urllib.parse
           import urllib.request
           from pathlib import Path
-
-          # 💡 修正點 1：延遲 5 秒，等待 GitHub 伺服器完全處理好你剛剛拖拽上傳的檔案
-          print("Waiting for GitHub assets to finalize...")
-          time.sleep(5)
 
           event_path = os.environ.get("GITHUB_EVENT_PATH")
           with open(event_path, "r", encoding="utf-8") as file_handle:
@@ -56,17 +51,17 @@ jobs:
           else:
             decoded = "[No ferry payload found]"
 
-          # 💡 修正點 2：加強正規表示法，完美捕捉新舊版所有 GitHub 附件與圖片網址
+          # 💡 修正點 1：擴充匹配規則，加入 github.com/user-attachments/ 網址路徑
           url_pattern = re.compile(
             r"https://github\.com/[^\s)]+/assets/[^\s)]+|"
-            r"https://github-production-user-asset-[^\s)]+|"
-            r"https://user-images\.githubusercontent\.com/[^\s)]+",
+            r"https://github\.com/user-attachments/files/[^\s)]+|"
+            r"https://github-production-user-asset-[^\s)]+",
             re.I,
           )
 
           urls = []
           for raw_url in url_pattern.findall(body):
-            # 移除 Markdown 的括號或標點符號結尾
+            # 移除 Markdown 語法結尾的右括號或常見標點
             cleaned = raw_url.split(')')[0].split(']')[0].rstrip(".,>")
             if cleaned not in urls:
               urls.append(cleaned)
@@ -85,19 +80,17 @@ jobs:
           for index, url in enumerate(urls, start=1):
             parsed = urllib.parse.urlparse(url)
             name = safe_name(Path(parsed.path).name, index)
-            # 確保檔名不會包含奇怪的 URL 參數
-            if "?" in name:
-              name = name.split("?")[0]
             dest = download_dir / f"{index:02d}_{name}"
 
-            # 💡 修正點 3：提供標準的使用者瀏覽器 Header，防止被 GitHub 阻擋下載
+            # 💡 修正點 2：加入 User-Agent 偽裝瀏覽器，防止 GitHub 直接阻擋無標頭下載
             request = urllib.request.Request(url)
-            request.add_header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64)")
+            request.add_header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+            
             if token and "github" in url.lower():
               request.add_header("Authorization", f"token {token}")
 
             try:
-              print(f"Attempting to download: {url}")
+              print(f"Downloading: {url}")
               with urllib.request.urlopen(request) as response:
                 dest.write_bytes(response.read())
               downloaded.append(str(dest))
@@ -105,7 +98,6 @@ jobs:
             except Exception as exc:
               print(f"-> Failed: {url} -> {exc}")
 
-          # 檢查下載目錄中是否有大於 0 類組的實體檔案
           has_attachments = any(download_dir.iterdir()) if download_dir.exists() else False
 
           output_path = os.environ.get("GITHUB_OUTPUT")
@@ -116,7 +108,6 @@ jobs:
               output.write(decoded)
               output.write("\nEOF\n")
               if has_attachments:
-                # 💡 修正點 4：明確指定萬用字元路徑
                 output.write("attachments=downloads/*\n")
               else:
                 output.write("attachments=\n")
