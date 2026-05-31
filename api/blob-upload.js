@@ -22,6 +22,27 @@ function readBody(req) {
   });
 }
 
+function buildRequest(req, rawBody) {
+  const protocol = req.headers["x-forwarded-proto"] || "https";
+  const host = req.headers["x-forwarded-host"] || req.headers.host || "localhost";
+  const url = `${protocol}://${host}${req.url || ""}`;
+  const headers = new Headers();
+
+  for (const [key, value] of Object.entries(req.headers || {})) {
+    if (Array.isArray(value)) {
+      headers.set(key, value.join(","));
+    } else if (value !== undefined) {
+      headers.set(key, String(value));
+    }
+  }
+
+  return new Request(url, {
+    method: req.method || "POST",
+    headers,
+    body: rawBody || null
+  });
+}
+
 module.exports = async (req, res) => {
   setCors(res);
 
@@ -72,9 +93,10 @@ module.exports = async (req, res) => {
   try {
     const rawBody = await readBody(req);
     const body = rawBody ? JSON.parse(rawBody) : {};
+    const request = buildRequest(req, rawBody);
 
     const jsonResponse = await handleUpload({
-      request: req,
+      request,
       body,
       onBeforeGenerateToken: async () => ({
         allowedContentTypes: ["text/plain"],
