@@ -5,11 +5,11 @@ let cachedHandleUpload = null;
 let cachedImportError = null;
 
 try {
-  const blobServer = require("@vercel/blob/server");
+  const blobClient = require("@vercel/blob/client");
   cachedHandleUpload =
-    blobServer.handleUpload ||
-    blobServer.default?.handleUpload ||
-    blobServer.default ||
+    blobClient.handleUpload ||
+    blobClient.default?.handleUpload ||
+    blobClient.default ||
     null;
 } catch (error) {
   cachedImportError = error;
@@ -83,7 +83,7 @@ module.exports = async (req, res) => {
     res.setHeader("Content-Type", "application/json");
     res.statusCode = 500;
     res.end(JSON.stringify({
-      error: "Failed to load @vercel/blob/server",
+      error: "Failed to load @vercel/blob/client",
       detail: cachedImportError?.message || "Module import failed"
     }));
     return;
